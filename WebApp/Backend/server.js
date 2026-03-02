@@ -21,17 +21,9 @@ testFirebase();
 const app = express();
 app.use(express.json());
 
-app.post("/log-alert", async (req, res) => {
-  try {
-    await addDoc(collection(db, "alerts"), {
-      ...req.body,
-      timestamp: serverTimestamp()
-    });
-    res.send({ status: "ok" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Error writing to Firestore");
-  }
-});
+app.get('/', (req ,res) => 
+ {res.send( { message: "Hello World"} )}
+);
+
 
 app.listen(3001, () => console.log("Backend running on http://localhost:3001"));

@@ -3,6 +3,9 @@ node_modules/
 
 # Environment variables
 .env
+# Python Env
+
+Final
 
 # Logs
 npm-debug.log*
