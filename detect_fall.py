@@ -1,50 +1,153 @@
-from ultralytics import YOLO
+import argparse
+import time
 import cv2
+import numpy as np
+import json
+from ultralytics import YOLO
+import paho.mqtt.client as mqtt
 
+# -----------------------------
+# Argument Parsing
+# -----------------------------
+parser = argparse.ArgumentParser()
+parser.add_argument("--camera_id", required=True)
+parser.add_argument("--broker_ip", required=True)
+parser.add_argument("--video", default=None)  # optional video file
+args = parser.parse_args()
+
+CAMERA_ID = args.camera_id
+BROKER_IP = args.broker_ip
+
+# -----------------------------
+# MQTT Setup
+# -----------------------------
+client = mqtt.Client()
+client.connect(BROKER_IP, 1883, 60)
+
+# -----------------------------
+# Load YOLOv8 Pose Model
+# -----------------------------
 model = YOLO("yolov8n-pose.pt")
-cap = cv2.VideoCapture(0)
 
-# Get frame dimensions to calculate the "Floor Zone"
-ret, frame = cap.read()
-if ret:
-    H, W, _ = frame.shape
-    floor_line = int(H * 0.8) # Bottom 20% of the screen is the floor
+if args.video:
+    cap = cv2.VideoCapture(args.video)
 else:
-    floor_line = 400
+    cap = cv2.VideoCapture(0)
+
+# -----------------------------
+# State Machine Variables
+# -----------------------------
+STATE = "STANDING"
+fall_time = None
+inactivity_start = None
+
+prev_nose_y = None
+ema_velocity = 0
+
+# Tunable thresholds (adjust for your demo)
+ANGLE_THRESHOLD = 55
+VELOCITY_THRESHOLD = 0.15   # normalized velocity
+INACTIVITY_TIME = 3        # seconds
+EMA_ALPHA = 0.4            # smoothing factor
+
+def compute_body_angle(kpts):
+    l_shoulder = kpts[5]
+    r_shoulder = kpts[6]
+    l_hip = kpts[11]
+    r_hip = kpts[12]
+
+    if min(l_shoulder[2], r_shoulder[2], l_hip[2], r_hip[2]) < 0.5:
+        return None
+
+    shoulder_mid = (l_shoulder[:2] + r_shoulder[:2]) / 2
+    hip_mid = (l_hip[:2] + r_hip[:2]) / 2
+
+    dx = hip_mid[0] - shoulder_mid[0]
+    dy = hip_mid[1] - shoulder_mid[1]
+
+    angle = np.degrees(np.arctan2(abs(dx), abs(dy)))
+    return angle
+
 
 while True:
     ret, frame = cap.read()
-    if not ret: break
+    if not ret:
+        break
 
     results = model(frame, imgsz=320, conf=0.5)
-    annotated_frame = results[0].plot()
-
-    # Draw a line representing the "Floor Zone" for debugging
-    cv2.line(annotated_frame, (0, floor_line), (W, floor_line), (255, 255, 0), 2)
+    annotated = results[0].plot()
 
     if results[0].keypoints is not None:
         for kpts in results[0].keypoints.data:
-            # 0: Nose, 13: Left Knee, 14: Right Knee
+
             nose = kpts[0]
-            l_knee = kpts[13]
-            r_knee = kpts[14]
+            angle = compute_body_angle(kpts)
 
-            # 1. Check if knees are detected
-            if l_knee[2] > 0.5 or r_knee[2] > 0.5:
-                # Use whichever knee is more visible
-                knee_y = l_knee[1] if l_knee[2] > r_knee[2] else r_knee[1]
-                
-                # FALL LOGIC: 
-                # Is the knee below the floor line? 
-                # AND is the nose close to the knee? (Person is crumpled/lying)
-                vertical_gap = abs(nose[1] - knee_y)
-                
-                if knee_y > floor_line and vertical_gap < (H * 0.25):
-                    cv2.putText(annotated_frame, "FALL ON FLOOR!", (50, 80), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+            if nose[2] < 0.5 or angle is None:
+                continue
 
-    cv2.imshow("Bedside Fall Monitor", annotated_frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'): break
+            current_nose_y = nose[1]
+
+            # Estimate body height for normalization
+            top = min(kpts[:,1])
+            bottom = max(kpts[:,1])
+            body_height = bottom - top
+            if body_height < 1:
+                continue
+
+            # Compute normalized velocity
+            if prev_nose_y is not None:
+                raw_velocity = (current_nose_y - prev_nose_y) / body_height
+            else:
+                raw_velocity = 0
+
+            prev_nose_y = current_nose_y
+
+            # Exponential Moving Average smoothing
+            ema_velocity = EMA_ALPHA * raw_velocity + (1 - EMA_ALPHA) * ema_velocity
+
+            # -----------------------------
+            # Finite State Machine
+            # -----------------------------
+
+            if STATE == "STANDING":
+                if ema_velocity > VELOCITY_THRESHOLD:
+                    STATE = "FALLING"
+                    fall_time = time.time()
+
+            elif STATE == "FALLING":
+                if angle > ANGLE_THRESHOLD:
+                    if inactivity_start is None:
+                        inactivity_start = time.time()
+
+                    # Confirm fall after inactivity
+                    if time.time() - inactivity_start > INACTIVITY_TIME:
+                        STATE = "FALLEN"
+
+                        payload = {
+                            "camera_id": CAMERA_ID,
+                            "state": "FALLEN",
+                            "timestamp": time.time()
+                        }
+
+                        client.publish("fall/events", json.dumps(payload))
+                else:
+                    STATE = "STANDING"
+                    inactivity_start = None
+
+            elif STATE == "FALLEN":
+                if angle < 30:
+                    STATE = "STANDING"
+                    inactivity_start = None
+
+            # Display debug info
+            cv2.putText(annotated, f"State: {STATE}", (30, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+    cv2.imshow(CAMERA_ID, annotated)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
 cap.release()
 cv2.destroyAllWindows()
