@@ -1,35 +1,39 @@
 import zmq
 import json
 
-# Initialize ZMQ context
-context = zmq.Context()
-socket = context.socket(zmq.SUB)
+def start_subscriber():
+    context = zmq.Context()
+    socket = context.socket(zmq.SUB)
 
-# Connect to the detector
-socket.connect("tcp://localhost:5555")
+    # Replace 'localhost' with the actual IP addresses of the cameras if needed
+    # If running two cameras on one PC, use two different ports (e.g., 5555 and 5556)
+    socket.connect("tcp://localhost:5555")
+    # socket.connect("tcp://localhost:5556") # Connect to the second camera here
 
-# Subscribe to the specific topic
-socket.setsockopt_string(zmq.SUBSCRIBE, u"fall_events")
+    # Subscribe to the specific topic
+    socket.setsockopt_string(zmq.SUBSCRIBE, "fall_events")
 
-print "Waiting for fall events... (Python 2.7 mode)"
+    print("Listening for fall events...")
 
-while True:
-    try:
-        # recv_multipart returns a list of bytes
-        topic, message = socket.recv_multipart()
-        
-        # In Python 2, we just load the message string
-        data = json.loads(message)
-        
-        # Use .format() for compatibility
-        print "Received alert on topic [{}]:".format(topic)
-        print "Status: {} at {}".format(data['event'], data['timestamp'])
-        print "------------------------------"
-        
-    except KeyboardInterrupt:
-        print "\nSubscriber stopped."
-        break
-    except Exception as e:
-        print "Error: {}".format(str(e))
-        break
+    while True:
+        try:
+            topic, messagedata = socket.recv_multipart()
+            data = json.loads(messagedata.decode())
+            
+            device = data.get("device_id")
+            p_id = data.get("person_id")
+            
+            print("-" * 30)
+            print(f"ALARM: Fall detected on {device}")
+            print(f"Subject: Person {p_id}")
+            print("-" * 30)
+            
+        except KeyboardInterrupt:
+            break
+
+    socket.close()
+    context.term()
+
+if __name__ == "__main__":
+    start_subscriber()
 
