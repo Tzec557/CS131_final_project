@@ -1,29 +1,17 @@
 import express from "express";
-import { db } from "./firebase.js";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-
-
-async function testFirebase() {
-  try {
-    const ref = await addDoc(collection(db, "test_connection"), {
-      message: "Hello Firebase!",
-      time: serverTimestamp()
-    });
-    console.log("🔥 Firebase test write OK. Doc ID:", ref.id);
-  } catch (err) {
-    console.error("❌ Firebase test write FAILED:", err);
-  }
-}
-
-testFirebase();
-
+import cors from "cors"
+import alertsRouter from "./routes/alerts.js";
+import dotenv from "dotenv";
+//import  {app, auth , db } from "firebase"
+dotenv.config();
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
-app.get('/', (req ,res) => 
- {res.send( { message: "Hello World"} )}
-);
+app.use("/alerts", alertsRouter);
 
-
-app.listen(3001, () => console.log("Backend running on http://localhost:3001"));
+const PORT = 3001;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+});

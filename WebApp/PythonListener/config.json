@@ -1,0 +1,26 @@
+{
+  "devices": [
+    {
+      "id": "devA",
+      "name": "Living Room",
+      "ip": "172.18.224.1"
+    },
+    {
+      "id": "devB",
+      "name": "Living Room",
+      "ip": "127.0.0.1"
+    }
+  ],
+
+  "pairs": [
+    {
+      "primary": "devA",
+      "secondary": "devB"
+    }
+  ],
+
+  "alertEmails": [
+    "jmmontes217@gmail.com"
+  ],
+  "ListeningWindow": 3 
+}
