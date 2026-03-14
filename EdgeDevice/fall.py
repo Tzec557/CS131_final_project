@@ -18,6 +18,7 @@ socket = context.socket(zmq.PUB)
 socket.bind(f"tcp://*:{args.port}")
 
 model = YOLO("yolov8n-pose.pt")
+
 # Ensure video source is handled as int for webcams
 video_source = int(args.video) if str(args.video).isdigit() else args.video
 cap = cv2.VideoCapture(video_source)
@@ -49,6 +50,7 @@ while True:
             
             if p_id not in person_data:
                 person_data[p_id] = {"state": "STANDING", "prev_y": curr_y, "ema": 0, "inactivity": None}
+            
             
             p = person_data[p_id]
             vel = (curr_y - p["prev_y"]) / height if p["prev_y"] else 0
